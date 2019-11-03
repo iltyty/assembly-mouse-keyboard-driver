@@ -12,11 +12,13 @@ assume ds: data
     infoPosY byte 0, 0, 0, ")"
     infoLen  equ $ - infoPos
 
-    posX     word 0
-    posY     word 0
+    posX     sword 0
+    posY     sword 0
     status   byte 0
     posXold  word 0
     posYold  word 0
+    deltaX   word 0
+    deltaY   word 0
 
     leftPressed word 0
     rightPressed word 0
@@ -311,10 +313,10 @@ handler proc far
 
     add bx, 6
     mov dx, es:[bx]
-    push dx
+    mov deltaY, dx
     add bx, 2
     mov dx, es:[bx]
-    push dx
+    mov deltaX, dx
     add bx, 2
     mov dx, es:[bx]
 
@@ -329,95 +331,83 @@ handler proc far
     ;; check button pressed
     mov ax, dx
     and ax, 1
-    ;; left button pressed
+
     .if ax > 0 && leftPressed == 0
+        ;; left button pressed
         mov leftPressed, 1
         drawrect 250, 160, 20, 20, 03h
     .elseif ax == 0 && leftPressed == 1
+        ;; left button released
         mov leftPressed, 0
         drawrect 250, 160, 20, 20, 0fh
     .endif
     mov ax, dx
     and ax, 2
-    ;; right button pressed
+    
     .if ax > 0 && rightPressed == 0
+        ;; right button pressed
         mov rightPressed, 1
         drawrect 330, 160, 20, 20, 02h
     .elseif ax == 0 && rightPressed == 1
+        ;; right button released
         mov rightPressed, 0
         drawrect 330, 160, 20, 20, 0fh
     .endif
 
-    pop dx
-    cmp dx, 0
-    jnz movedx
-    jmp third
-movedx:
-    test status, 10h
-    jnz  xnegative
-    add posX, dx
+    ;; delta x
+    
+    mov dx, deltaX
+    ; .if deltaX < 0
+    ;     neg dl
+    ; .endif
+    .if dx != 0
+        mov al, status
+        and al, 10h
+        .if al > 0
+            neg dl
+            sub posX, dx
+            .if posX <= 0
+                mov posX, 0
+            .endif
+        .else
+            add posX, dx
+            .if posX >= 639
+                mov posX, 639
+            .endif
+        .endif
+        
+    .endif
 
-    cmp posX, 639
-    jnb big640
-    jmp third
-big640:
-    mov posX, 639
-    jmp third
-xnegative:
-    neg dl
-    sub posX, dx
-    cmp posX, 0
-    jl xless0
-    jmp third
-xless0:
-    mov posX, 0
-    jmp third
+    mov dx, deltaY
+    .if dx != 0
+        mov al, status
+        and al, 20h
+        .if al > 0
+            neg dl
+            add posY, dx
+            .if posY <= 0
+                mov posY, 0
+            .endif
+        .else
+            sub posY, dx
+            .if posY >= 479
+                mov posY, 479
+            .endif
+        .endif
+        
+    .endif
 
-third:
-    pop dx
-    cmp dx, 0
-    jnz movedy
-    jmp complete
-
-movedy:
-    test status, 20h
-    jnz ynegative
-
-    sub posY, dx
-    cmp posY, 0
-    jl yless0
-    jmp complete
-yless0:
-    mov posY, 0
-    jmp complete
-
-ynegative:
-    neg dl
-    add posY, dx
-    cmp posY, 479
-    jnb big480
-    jmp complete
-big480:
-    mov posY, 479
-    jmp complete
-
-complete:
-    ; push cs
-    ; pop ax
     mov ax, data
     mov es, ax
     mov ds, ax
-    mov si, OFFSET savenew
-    mov di, OFFSET saveold
-    mov cx, mousePixelsLen*2
+
+    mov si, offset savenew
+    mov di, offset saveold
+    mov cx, mousePixelsLen * 2
     cld
     rep movsb
 
-    ;使用saveold恢复原屏幕值
     call restore
-
-    draw posX, posY, 0fh
-    ;保存新鼠标位置的屏幕值到savenew缓冲中
     call save_mouse
 
 showms:
@@ -454,13 +444,10 @@ handler endp
 
 ;恢复老鼠标位置屏幕
 restore proc far
-    pushad
+    pusha
+
     mov ax, data
     mov ds, ax
-    mov ebx, 0
-    mov edx, 0
-    mov ecx, 0
-    mov eax, 0
 
     mov ax, mousePixelsLen
     shr ax, 1                ;count/2 (WORD)
@@ -490,9 +477,9 @@ CT:
     add di, 2                   ;next word
     dec mousePixelsCnt
     jnz restorepixel
-    popad
-    ret
 
+    popa
+    ret
 restore endp
 
 ;保存当前鼠标位置的屏幕内容
