@@ -18,6 +18,9 @@ assume ds: data
     posXold  word 0
     posYold  word 0
 
+    leftPressed word 0
+    rightPressed word 0
+
 
     ; mouse shape, each word type data represents a pixel
     mousePixels word 0000h
@@ -314,40 +317,37 @@ handler proc far
     push dx
     add bx, 2
     mov dx, es:[bx]
-    push dx
 
-first:
-    pop dx
     mov status, dl
 
-    ;保存老的鼠标的x, y坐标信息
+    ;; store previous position
     mov ax, posX
     mov posXold, ax
     mov ax, posY
     mov posYold, ax
 
-;左键
-    test dx, 1
-    jnz ld
-    drawrect 250, 160, 60, 100, 0fh
-    jmp n
-ld:
-    mov ax, posX
-    mov ax, posY
-    drawrect 250, 160, 60, 100, 03h
-;右键
-n:
-    test dx, 2
-    jnz rd                ;按下右键
-    drawrect 330, 160, 60, 100, 0fh
-    jmp second
-rd:
-    mov ax, posX
-    mov ax, posY
-    drawrect 330, 160, 60, 100, 02h
+    ;; check button pressed
+    mov ax, dx
+    and ax, 1
+    ;; left button pressed
+    .if ax > 0 && leftPressed == 0
+        mov leftPressed, 1
+        drawrect 250, 160, 20, 20, 03h
+    .elseif ax == 0 && leftPressed == 1
+        mov leftPressed, 0
+        drawrect 250, 160, 20, 20, 0fh
+    .endif
+    mov ax, dx
+    and ax, 2
+    ;; right button pressed
+    .if ax > 0 && rightPressed == 0
+        mov rightPressed, 1
+        drawrect 330, 160, 20, 20, 02h
+    .elseif ax == 0 && rightPressed == 1
+        mov rightPressed, 0
+        drawrect 330, 160, 20, 20, 0fh
+    .endif
 
-;X位移处理过程
-second:
     pop dx
     cmp dx, 0
     jnz movedx
@@ -357,7 +357,6 @@ movedx:
     jnz  xnegative
     add posX, dx
 
-    ;防止鼠标移出屏幕
     cmp posX, 639
     jnb big640
     jmp third
@@ -374,7 +373,6 @@ xless0:
     mov posX, 0
     jmp third
 
-;Y位移处理过程
 third:
     pop dx
     cmp dx, 0
@@ -418,6 +416,7 @@ complete:
     ;使用saveold恢复原屏幕值
     call restore
 
+    draw posX, posY, 0fh
     ;保存新鼠标位置的屏幕值到savenew缓冲中
     call save_mouse
 
@@ -594,8 +593,8 @@ btoasc endp
 main:
     call init
 
-    drawrect 250, 160, 60, 100, 0fh
-    drawrect 330, 160, 60, 100, 0fh
+    drawrect 250, 160, 20, 20, 0fh
+    drawrect 330, 160, 20, 20, 0fh
 
     call installHandler
     call save_mouse
