@@ -65,6 +65,76 @@ data ends
 code segment use16
 assume cs:code
 
+;; al: color
+draw macro x, y, color
+    push ax
+    push cx
+    push dx
+    
+    mov cx, x
+    mov dx, y
+    mov al, color
+    mov ah, 0ch
+    mov bh, 0
+    int 10h
+
+    pop dx
+    pop cx
+    pop ax
+endm
+
+drawverline macro x, y1, y2, color
+    ;; starting from (x, y) assume y1 < y2
+    push ax
+
+    mov ax, y1
+    .while ax <= y2
+        draw x, ax, color
+        inc ax
+    .endw
+
+    pop ax
+endm
+
+drawhorline macro x1, x2, y, color
+    ;; starting from (x1, y) assume x1 < x2
+    push ax
+
+    mov ax, x1
+    .while ax <= x2
+        draw ax, y, color
+        inc ax
+    .endw
+
+    pop ax
+endm
+
+;; (x, y) left top point 
+;; w, h for width, height
+drawrect macro x, y, w, h, color
+    push ax
+    push bx
+    push cx
+    push dx
+    
+    mov ax, x
+    mov cx, ax
+    mov bx, y
+    mov dx, bx
+    add cx, w
+    add dx, h
+
+    .while cx >= ax
+        drawverline cx, bx, dx, color
+        dec cx
+    .endw
+
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+endm
+
 ; init procedure
 init proc far
     pusha
@@ -259,26 +329,22 @@ first:
 ;左键
     test dx, 1
     jnz ld
-    mov rectcolor, 0fh
-    call drawleftbutton
+    drawrect 250, 160, 60, 100, 0fh
     jmp n
 ld:
     mov ax, posX
     mov ax, posY
-    mov rectcolor, 03h    ;左键变色
-    call drawleftbutton
+    drawrect 250, 160, 60, 100, 03h
 ;右键
 n:
     test dx, 2
     jnz rd                ;按下右键
-    mov rectcolor, 0fh    ;右键没有按下按钮变白
-    call drawrightbutton
+    drawrect 330, 160, 60, 100, 0fh
     jmp second
 rd:
     mov ax, posX
     mov ax, posY
-    mov rectcolor, 02h
-    call drawrightbutton
+    drawrect 330, 160, 60, 100, 02h
 
 ;X位移处理过程
 second:
@@ -511,101 +577,6 @@ next:
     ret
 show_mouse endp
 
-;画水平线
-drawhorline proc far
-    pusha
-    mov cx, lineend2x
-    sub cx, lineend1x
-    inc cx              ;循环次数
-    mov bx, lineend1x   ;bx暂存posx
-    mov dx, lineend1y
-
-horlinedraw:
-    push cx
-    mov cx, bx
-    mov ah, 0ch
-    mov al, linecolor
-    mov bh, 0
-    int 10h
-    inc cx
-    mov bx, cx
-    pop cx
-    loop horlinedraw
-    popa
-    ret
-drawhorline ENDP
-
-;画竖直线
-drawverline proc far
-    pusha
-    mov cx, lineend2y
-    sub cx, lineend1y
-    inc cx              ;循环次数
-    mov bx, lineend1x   ;暂存x
-    mov dx, lineend1y
-
-verlinedraw:
-    push cx
-    mov cx, bx
-    mov ah, 0ch
-    mov al, linecolor
-    mov bh, 0
-    int 10h
-    inc dx
-    mov bx, cx
-    pop cx
-    loop verlinedraw
-    popa
-    ret
-drawverline endp
-
-;画矩形
-drawrect proc far
-    pusha
-    mov ax, rectend1x
-    mov lineend1x, ax
-    mov ax, rectend2x
-    mov lineend2x, ax
-    mov cx, rectend2y
-    sub cx, rectend1y
-    inc cx
-    mov al, rectcolor
-    mov linecolor, al
-    mov ax, rectend1y
-    mov lineend1y, ax
-
-rectdraw:
-    call drawhorline
-    inc lineend1y
-    loop rectdraw
-    popa
-    ret
-drawrect endp
-
-;画左键
-drawleftbutton proc far
-    pusha
-    mov rectend1x, 250
-    mov rectend1y, 160
-    mov rectend2x, 310
-    mov rectend2y, 260
-    call drawrect
-    popa
-    ret
-drawleftbutton endp
-
-;画右键
-drawrightbutton proc far
-    pusha
-    mov rectend1x, 330
-    mov rectend1y, 160
-    mov rectend2x, 390
-    mov rectend2y, 260
-    call drawrect
-    popa
-    ret
-drawrightbutton endp
-
 btoasc proc far
     mov si, 3
     mov cx, 10
@@ -623,27 +594,12 @@ btoasc endp
 main:
     call init
 
-    pusha
-    mov rectcolor, 0fh
-    call drawleftbutton
-    call drawrightbutton
-    popa
+    drawrect 250, 160, 60, 100, 0fh
+    drawrect 330, 160, 60, 100, 0fh
 
     call installHandler
     call save_mouse
     call listenEsc
-
-
-lineend1x WORD 0
-lineend1y WORD 0
-lineend2x WORD 0
-lineend2y WORD 0
-rectend1x WORD 0
-rectend1y WORD 0
-rectend2x WORD 0
-rectend2y WORD 0
-linecolor BYTE 0fh
-rectcolor BYTE 0fh
 
 code ends
 end main
