@@ -1,28 +1,27 @@
 .486
 data segment use16
 assume ds: data
-    titleMsg byte " Welcome to the mouse driver program!", 0ah, 0dh, 0
-             byte "Here are the list of implemented functions:", 0ah, 0dh, 0
-             byte "Mouse cursor display, position display, left/right button clicked display", 0ah, 0dh, 0
-             byte "Press Esc to quit."
+    titleMsg byte "   O_o    Hey, my eyes are RGB lights!    O_o"
     titleLen equ $ - titleMsg
+
+    promptMsg byte "Press Esc to kill me T^T"
+    promptLen equ $ - promptMsg
 
     infoPos  byte "Mouse position: ("
     infoPosX byte 0, 0, 0, ", "
     infoPosY byte 0, 0, 0, ")"
     infoLen  equ $ - infoPos
 
+    status   byte  0
+    deltaX   word  0
+    deltaY   word  0
     posX     sword 0
     posY     sword 0
-    status   byte 0
-    posXold  word 0
-    posYold  word 0
-    deltaX   word 0
-    deltaY   word 0
+    posXPrev word  0
+    posYPrev word  0
 
-    leftPressed word 0
+    leftPressed  word 0
     rightPressed word 0
-
 
     ; mouse shape, each word type data represents a pixel
     mousePixels word 0000h
@@ -58,11 +57,11 @@ assume ds: data
                 word 000fh,                             050fh, 060fh, 070fh, 080fh
 
     mousePixelsLen   equ $ - mousePixels
-    mousecolor       byte mousePixelsLen dup (0fh)
+    mouseColor       byte mousePixelsLen dup (0fh)
     mousePixelsCnt   word 0
 
-    saveold  byte mousePixelsLen dup (0)    ;保存鼠标位置的屏幕图象
-    savenew  byte mousePixelsLen dup (0)    ;用于和saveold交替使用
+    pixelPrev  byte mousePixelsLen dup (0)
+    pixelCurr  byte mousePixelsLen dup (0)
 
 data ends
 
@@ -75,7 +74,7 @@ draw macro x, y, color
     push ax
     push cx
     push dx
-    
+
     mov cx, x
     mov dx, y
     mov al, color
@@ -114,14 +113,14 @@ drawhorline macro x1, x2, y, color
     pop ax
 endm
 
-;; (x, y) left top point 
+;; (x, y) left top point
 ;; w, h for width, height
 drawrect macro x, y, w, h, color
     push ax
     push bx
     push cx
     push dx
-    
+
     mov ax, x
     mov cx, ax
     mov bx, y
@@ -138,6 +137,24 @@ drawrect macro x, y, w, h, color
     pop cx
     pop bx
     pop ax
+endm
+
+drawframe macro x, y, w, h, color
+    pusha
+
+    mov ax, x
+    mov cx, ax
+    mov bx, y
+    mov dx, bx
+    add cx, w
+    add dx, h
+
+    drawhorline ax, cx, bx, color
+    drawhorline ax, cx, dx, color
+    drawverline ax, bx, dx, color
+    drawverline cx, bx, dx, color
+
+    popa
 endm
 
 ; init procedure
@@ -184,14 +201,24 @@ init proc far
     ; cx:     Length of the target string
     ; dh, dl: coordinate (row, column)
     ; -----------------------------------------------------
-    mov bp, offset titleMsg
-    mov cx, titleLen
-    mov dh, 0
-    mov dl, 0
-    mov bh, 0
     mov al, 0
-    mov bl, 7
     mov ah, 13h
+    mov bp, offset titleMsg
+    mov bh, 0
+    mov bl, 7
+    mov cx, titleLen
+    mov dl, 17
+    mov dh, 0
+    int 10h
+
+    mov al, 0
+    mov ah, 13h
+    mov bp, offset promptMsg
+    mov bh, 0
+    mov bl, 7
+    mov cx, promptLen
+    mov dl, 0
+    mov dh, 27
     int 10h
 
     popa
@@ -209,13 +236,11 @@ installHandler proc far
     ; Entry args:
     ; ax:    0c207h: set device handler address
     ; es:bx: far user device handler or 0000h:0000h to cancel
-    mov ax, seg handler
+    mov ax, cs
     mov es, ax
     mov ax, 0c207h
-    mov bx, OFFSET handler
+    mov bx, offset handler
     int 15h
-    ; CF set to 1 on error
-    jc errInstall
 
     ; Enable mouse device handler with interrupt 15h
     ; Entry args:
@@ -224,54 +249,25 @@ installHandler proc far
     mov ax, 0c200h
     mov bh, 1
     int 15h
-    ; CF set to 1 on error
-    jc errEnable
 
-errInstall:
-errEnable:
     popa
     ret
 
 installHandler endp
 
 listenEsc proc far
-    mov ah, 11h
-    int 16h
-    ; no key pressed
-    jz noKeyPressed
-    mov ah, 10h
-    int 16h
-    ; key pressed, but not Esc
-    cmp al, 1Bh
-    jne noKeyPressed
-    jmp escPressed
+    mov al, 0
 
-noKeyPressed:
-    mov ah, 11h
-    int 16h
-    jz noKeyPressed
-    mov ah, 10h
-    int 16h
-    ; key pressed, but not Esc
-    cmp al, 1Bh
-    jne noKeyPressed
+    .while al != 1bh
+        mov ah, 10h
+        int 16h
+    .endw
 
-escPressed:
-    ; clear handler
-    mov ax, seg nullhandler
-    mov es, ax
-    mov bx, OFFSET nullhandler
-    mov ax, 0c207h
-    int 15h
-
+    ; reset mouse device
     mov ax, 0c201h
     int 15h
 
-    mov bx, 0
-    mov dx, 0
-    mov ax, 4f05h
-    int 10h
-
+    ; exit
     mov al, 02
     mov ah, 0
     int 10h
@@ -279,10 +275,6 @@ escPressed:
     int 21h
 
 listenEsc endp
-
-nullhandler proc far
-    ret
-nullhandler endp
 
 ; mouse device handler procedure
 ; stack status:
@@ -324,9 +316,9 @@ handler proc far
 
     ;; store previous position
     mov ax, posX
-    mov posXold, ax
+    mov posXPrev, ax
     mov ax, posY
-    mov posYold, ax
+    mov posYPrev, ax
 
     ;; check button pressed
     mov ax, dx
@@ -335,31 +327,27 @@ handler proc far
     .if ax > 0 && leftPressed == 0
         ;; left button pressed
         mov leftPressed, 1
-        drawrect 250, 160, 20, 20, 03h
+        drawrect 250, 160, 30, 30, 0ah
     .elseif ax == 0 && leftPressed == 1
         ;; left button released
         mov leftPressed, 0
-        drawrect 250, 160, 20, 20, 0fh
+        drawrect 250, 160, 30, 30, 0fh
     .endif
     mov ax, dx
     and ax, 2
-    
+
     .if ax > 0 && rightPressed == 0
         ;; right button pressed
         mov rightPressed, 1
-        drawrect 330, 160, 20, 20, 02h
+        drawrect 330, 160, 30, 30, 0ch
     .elseif ax == 0 && rightPressed == 1
         ;; right button released
         mov rightPressed, 0
-        drawrect 330, 160, 20, 20, 0fh
+        drawrect 330, 160, 30, 30, 0fh
     .endif
 
     ;; delta x
-    
     mov dx, deltaX
-    ; .if deltaX < 0
-    ;     neg dl
-    ; .endif
     .if dx != 0
         mov al, status
         and al, 10h
@@ -371,11 +359,11 @@ handler proc far
             .endif
         .else
             add posX, dx
-            .if posX >= 639
-                mov posX, 639
+            .if posX >= 640
+                mov posX, 640
             .endif
         .endif
-        
+
     .endif
 
     mov dx, deltaY
@@ -385,8 +373,8 @@ handler proc far
         .if al > 0
             neg dl
             add posY, dx
-            .if posY >= 479
-                mov posY, 479
+            .if posY >= 480
+                mov posY, 480
             .endif
         .else
             sub posY, dx
@@ -394,24 +382,24 @@ handler proc far
                 mov posY, 0
             .endif
         .endif
-        
+
     .endif
 
     mov ax, data
     mov es, ax
     mov ds, ax
 
-    mov si, offset savenew
-    mov di, offset saveold
+    mov si, offset pixelCurr
+    mov di, offset pixelPrev
     mov cx, mousePixelsLen * 2
     cld
     rep movsb
 
-    call restore
-    call save_mouse
+    call restorePixels
+    call savePixels
 
 showms:
-    call show_mouse
+    call drawMouse
 
     ; display mouse position
     pusha
@@ -421,17 +409,17 @@ showms:
 
     mov ax, posX
     mov bx, offset infoPosX
-    call btoasc
+    call updatePosStr
 
     mov ax, posY
     mov bx, offset infoPosY
-    call btoasc
+    call updatePosStr
 
     ; display mouse position
     mov bp, offset infoPos
     mov cx, infoLen
-    mov dh, 6
-    mov dl, 23
+    mov dh, 20
+    mov dl, 25
     mov bh, 0
     mov al, 0
     mov bl, 7
@@ -442,22 +430,21 @@ showms:
     ret
 handler endp
 
-;恢复老鼠标位置屏幕
-restore proc far
+restorePixels proc far
     pusha
 
     mov ax, data
     mov ds, ax
 
     mov ax, mousePixelsLen
-    shr ax, 1             
+    shr ax, 1
     mov mousePixelsCnt, ax
     mov di, 0
     mov si, 0
 
     .while mousePixelsCnt > 0
-        mov cx, posXold         
-        mov dx, posYold
+        mov cx, posXPrev
+        mov dx, posYPrev
         mov ax, mousePixels[di]
 
         movzx bx, ah
@@ -465,18 +452,18 @@ restore proc far
         movzx bx, al
         add dx, bx
 
-        draw cx, dx, saveold[si]
+        draw cx, dx, pixelPrev[si]
 
         inc si
-        add di, 2  
+        add di, 2
         dec mousePixelsCnt
     .endw
 
     popa
     ret
-restore endp
+restorePixels endp
 
-save_mouse proc far
+savePixels proc far
     pusha
 
     mov ax, data
@@ -501,7 +488,7 @@ save_mouse proc far
         mov ah, 0dh
         mov bh, 0
         int 10h
-        mov savenew[si], al
+        mov pixelCurr[si], al
 
         inc si
         add di, 2
@@ -510,9 +497,9 @@ save_mouse proc far
 
     popa
     ret
-save_mouse endp
+savePixels endp
 
-show_mouse proc far
+drawMouse proc far
     pusha
 
     mov ax, data
@@ -524,6 +511,7 @@ show_mouse proc far
     mov di, 0
     mov si, 0
 
+    ; draw mouse pixel by pixel
     .while mousePixelsCnt > 0
         mov cx, posX
         mov dx, posY
@@ -534,41 +522,42 @@ show_mouse proc far
         movzx bx, al
         add dx, bx
 
-        .if cx <= 639
-            draw cx, dx, mousecolor[si]
+        .if cx < 640
+            draw cx, dx, mouseColor[si]
         .endif
 
-        add di, 2               ;next word
+        add di, 2
         dec mousePixelsCnt
     .endw
 
     popa
     ret
-show_mouse endp
+drawMouse endp
 
-btoasc proc far
+updatePosStr proc far
     mov si, 3
     mov cx, 10
 
     .while si > 0
         mov dx, 0
         div cx
-        add dl, 30h
+        add dl, 48
         dec si
         mov [bx][si], dl
     .endw
 
     ret
-btoasc endp
+updatePosStr endp
 
 main:
     call init
 
-    drawrect 250, 160, 20, 20, 0fh
-    drawrect 330, 160, 20, 20, 0fh
+    drawframe 200, 120, 180, 80, 0fh
+    drawrect 250, 160, 30, 30, 0fh
+    drawrect 330, 160, 30, 30, 0fh
+    drawhorline 290, 320, 230, 0fh
 
     call installHandler
-    call save_mouse
     call listenEsc
 
 code ends
