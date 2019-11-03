@@ -385,13 +385,13 @@ handler proc far
         .if al > 0
             neg dl
             add posY, dx
-            .if posY <= 0
-                mov posY, 0
+            .if posY >= 479
+                mov posY, 479
             .endif
         .else
             sub posY, dx
-            .if posY >= 479
-                mov posY, 479
+            .if posY <= 0
+                mov posY, 0
             .endif
         .endif
         
@@ -450,82 +450,73 @@ restore proc far
     mov ds, ax
 
     mov ax, mousePixelsLen
-    shr ax, 1                ;count/2 (WORD)
-    mov mousePixelsCnt, ax ;mousePixelsCnt = mousePixelsLen/2
+    shr ax, 1             
+    mov mousePixelsCnt, ax
     mov di, 0
     mov si, 0
 
-restorepixel:
-    mov cx, posXold          ;将前一个鼠标位置x坐标放到cx中
-    mov ax, mousePixels[di]    ;将鼠标中的一个点放到ax中
-    push ax
-    shr ax, 8
-    and ax, 0fh
-    add cx, ax               ;cx存储x坐标
-    pop ax
-    mov dx, posYold
-    and ax, 0fh
-    add dx, ax               ;dx存储y坐标
+    .while mousePixelsCnt > 0
+        mov cx, posXold         
+        mov dx, posYold
+        mov ax, mousePixels[di]
 
-    mov ah, 0ch
-    mov al, saveold[si]
-    mov bh, 0
-    int 10h
-    inc si
+        movzx bx, ah
+        add cx, bx
+        movzx bx, al
+        add dx, bx
 
-CT:
-    add di, 2                   ;next word
-    dec mousePixelsCnt
-    jnz restorepixel
+        draw cx, dx, saveold[si]
+
+        inc si
+        add di, 2  
+        dec mousePixelsCnt
+    .endw
 
     popa
     ret
 restore endp
 
-;保存当前鼠标位置的屏幕内容
 save_mouse proc far
-    pushad
+    pusha
 
     mov ax, data
     mov ds, ax
-
-    mov bx, 0
 
     mov ax, mousePixelsLen
     shr ax, 1
     mov mousePixelsCnt, ax
     mov di, 0
     mov si, 0
-savepixel:
-    mov cx, posX
-    mov ax, mousePixels[di]
-    movzx bx, ah
-    add cx, bx
 
-    mov dx, posY
-    movzx bx, al
-    add dx, bx
+    .while mousePixelsCnt > 0
+        mov cx, posX
+        mov dx, posY
+        mov ax, mousePixels[di]
 
-    mov ah, 0dh
-    mov bh, 0
-    int 10h
-    mov savenew[si], al
-    inc si
+        movzx bx, ah
+        add cx, bx
+        movzx bx, al
+        add dx, bx
 
-    add di, 2               ;next word
-    dec mousePixelsCnt
-    jnz savepixel
-    popad
+        mov ah, 0dh
+        mov bh, 0
+        int 10h
+        mov savenew[si], al
+
+        inc si
+        add di, 2
+        dec mousePixelsCnt
+    .endw
+
+    popa
     ret
 save_mouse endp
 
-;功能 :显示鼠标
 show_mouse proc far
-    pushad
+    pusha
+
     mov ax, data
     mov ds, ax
-
-    mov bx, 0
 
     mov ax, mousePixelsLen
     shr ax, 1
@@ -533,47 +524,40 @@ show_mouse proc far
     mov di, 0
     mov si, 0
 
-lodrmos:
-    mov ax, mousePixels[di]
+    .while mousePixelsCnt > 0
+        mov cx, posX
+        mov dx, posY
+        mov ax, mousePixels[di]
 
-    mov cx, posX
-    movzx bx, ah
-    add cx, bx
+        movzx bx, ah
+        add cx, bx
+        movzx bx, al
+        add dx, bx
 
-    mov dx, posY
-    movzx bx, al
-    add dx, bx
+        .if cx <= 639
+            draw cx, dx, mousecolor[si]
+        .endif
 
-    cmp cx, 639
-    jg next                ;超过边框不用画
-    jmp notexceed
+        add di, 2               ;next word
+        dec mousePixelsCnt
+    .endw
 
-notexceed:
-    mov ah, 0ch
-    mov al, mousecolor[si]
-    mov bh, 0
-    int 10h
-    inc si
-
-next:
-    add di, 2               ;next word
-    dec mousePixelsCnt
-    jnz lodrmos
-    popad
+    popa
     ret
 show_mouse endp
 
 btoasc proc far
     mov si, 3
     mov cx, 10
-btoasc1:
-    xor dx, dx
-    div cx
-    add dl, 30h
-    dec si
-    mov [bx][si], dl
-    or si, si
-    jnz btoasc1
+
+    .while si > 0
+        mov dx, 0
+        div cx
+        add dl, 30h
+        dec si
+        mov [bx][si], dl
+    .endw
+
     ret
 btoasc endp
 
