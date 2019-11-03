@@ -12,11 +12,16 @@ assume ds: data
     infoPosY byte 0, 0, 0, ")"
     infoLen  equ $ - infoPos
 
-    posX     word 0
-    posY     word 0
+    posX     sword 0
+    posY     sword 0
     status   byte 0
     posXold  word 0
     posYold  word 0
+    deltaX   word 0
+    deltaY   word 0
+
+    leftPressed word 0
+    rightPressed word 0
 
 
     ; mouse shape, each word type data represents a pixel
@@ -308,117 +313,101 @@ handler proc far
 
     add bx, 6
     mov dx, es:[bx]
-    push dx
+    mov deltaY, dx
     add bx, 2
     mov dx, es:[bx]
-    push dx
+    mov deltaX, dx
     add bx, 2
     mov dx, es:[bx]
-    push dx
 
-first:
-    pop dx
     mov status, dl
 
-    ;保存老的鼠标的x, y坐标信息
+    ;; store previous position
     mov ax, posX
     mov posXold, ax
     mov ax, posY
     mov posYold, ax
 
-;左键
-    test dx, 1
-    jnz ld
-    drawrect 250, 160, 60, 100, 0fh
-    jmp n
-ld:
-    mov ax, posX
-    mov ax, posY
-    drawrect 250, 160, 60, 100, 03h
-;右键
-n:
-    test dx, 2
-    jnz rd                ;按下右键
-    drawrect 330, 160, 60, 100, 0fh
-    jmp second
-rd:
-    mov ax, posX
-    mov ax, posY
-    drawrect 330, 160, 60, 100, 02h
+    ;; check button pressed
+    mov ax, dx
+    and ax, 1
 
-;X位移处理过程
-second:
-    pop dx
-    cmp dx, 0
-    jnz movedx
-    jmp third
-movedx:
-    test status, 10h
-    jnz  xnegative
-    add posX, dx
+    .if ax > 0 && leftPressed == 0
+        ;; left button pressed
+        mov leftPressed, 1
+        drawrect 250, 160, 20, 20, 03h
+    .elseif ax == 0 && leftPressed == 1
+        ;; left button released
+        mov leftPressed, 0
+        drawrect 250, 160, 20, 20, 0fh
+    .endif
+    mov ax, dx
+    and ax, 2
+    
+    .if ax > 0 && rightPressed == 0
+        ;; right button pressed
+        mov rightPressed, 1
+        drawrect 330, 160, 20, 20, 02h
+    .elseif ax == 0 && rightPressed == 1
+        ;; right button released
+        mov rightPressed, 0
+        drawrect 330, 160, 20, 20, 0fh
+    .endif
 
-    ;防止鼠标移出屏幕
-    cmp posX, 639
-    jnb big640
-    jmp third
-big640:
-    mov posX, 639
-    jmp third
-xnegative:
-    neg dl
-    sub posX, dx
-    cmp posX, 0
-    jl xless0
-    jmp third
-xless0:
-    mov posX, 0
-    jmp third
+    ;; delta x
+    
+    mov dx, deltaX
+    ; .if deltaX < 0
+    ;     neg dl
+    ; .endif
+    .if dx != 0
+        mov al, status
+        and al, 10h
+        .if al > 0
+            neg dl
+            sub posX, dx
+            .if posX <= 0
+                mov posX, 0
+            .endif
+        .else
+            add posX, dx
+            .if posX >= 639
+                mov posX, 639
+            .endif
+        .endif
+        
+    .endif
 
-;Y位移处理过程
-third:
-    pop dx
-    cmp dx, 0
-    jnz movedy
-    jmp complete
+    mov dx, deltaY
+    .if dx != 0
+        mov al, status
+        and al, 20h
+        .if al > 0
+            neg dl
+            add posY, dx
+            .if posY >= 479
+                mov posY, 479
+            .endif
+        .else
+            sub posY, dx
+            .if posY <= 0
+                mov posY, 0
+            .endif
+        .endif
+        
+    .endif
 
-movedy:
-    test status, 20h
-    jnz ynegative
-
-    sub posY, dx
-    cmp posY, 0
-    jl yless0
-    jmp complete
-yless0:
-    mov posY, 0
-    jmp complete
-
-ynegative:
-    neg dl
-    add posY, dx
-    cmp posY, 479
-    jnb big480
-    jmp complete
-big480:
-    mov posY, 479
-    jmp complete
-
-complete:
-    ; push cs
-    ; pop ax
     mov ax, data
     mov es, ax
     mov ds, ax
-    mov si, OFFSET savenew
-    mov di, OFFSET saveold
-    mov cx, mousePixelsLen*2
+
+    mov si, offset savenew
+    mov di, offset saveold
+    mov cx, mousePixelsLen * 2
     cld
     rep movsb
 
-    ;使用saveold恢复原屏幕值
     call restore
-
-    ;保存新鼠标位置的屏幕值到savenew缓冲中
     call save_mouse
 
 showms:
@@ -455,91 +444,79 @@ handler endp
 
 ;恢复老鼠标位置屏幕
 restore proc far
-    pushad
+    pusha
+
     mov ax, data
     mov ds, ax
-    mov ebx, 0
-    mov edx, 0
-    mov ecx, 0
-    mov eax, 0
 
     mov ax, mousePixelsLen
-    shr ax, 1                ;count/2 (WORD)
-    mov mousePixelsCnt, ax ;mousePixelsCnt = mousePixelsLen/2
+    shr ax, 1             
+    mov mousePixelsCnt, ax
     mov di, 0
     mov si, 0
 
-restorepixel:
-    mov cx, posXold          ;将前一个鼠标位置x坐标放到cx中
-    mov ax, mousePixels[di]    ;将鼠标中的一个点放到ax中
-    push ax
-    shr ax, 8
-    and ax, 0fh
-    add cx, ax               ;cx存储x坐标
-    pop ax
-    mov dx, posYold
-    and ax, 0fh
-    add dx, ax               ;dx存储y坐标
+    .while mousePixelsCnt > 0
+        mov cx, posXold         
+        mov dx, posYold
+        mov ax, mousePixels[di]
 
-    mov ah, 0ch
-    mov al, saveold[si]
-    mov bh, 0
-    int 10h
-    inc si
+        movzx bx, ah
+        add cx, bx
+        movzx bx, al
+        add dx, bx
 
-CT:
-    add di, 2                   ;next word
-    dec mousePixelsCnt
-    jnz restorepixel
-    popad
+        draw cx, dx, saveold[si]
+
+        inc si
+        add di, 2  
+        dec mousePixelsCnt
+    .endw
+
+    popa
     ret
-
 restore endp
 
-;保存当前鼠标位置的屏幕内容
 save_mouse proc far
-    pushad
+    pusha
 
     mov ax, data
     mov ds, ax
-
-    mov bx, 0
 
     mov ax, mousePixelsLen
     shr ax, 1
     mov mousePixelsCnt, ax
     mov di, 0
     mov si, 0
-savepixel:
-    mov cx, posX
-    mov ax, mousePixels[di]
-    movzx bx, ah
-    add cx, bx
 
-    mov dx, posY
-    movzx bx, al
-    add dx, bx
+    .while mousePixelsCnt > 0
+        mov cx, posX
+        mov dx, posY
+        mov ax, mousePixels[di]
 
-    mov ah, 0dh
-    mov bh, 0
-    int 10h
-    mov savenew[si], al
-    inc si
+        movzx bx, ah
+        add cx, bx
+        movzx bx, al
+        add dx, bx
 
-    add di, 2               ;next word
-    dec mousePixelsCnt
-    jnz savepixel
-    popad
+        mov ah, 0dh
+        mov bh, 0
+        int 10h
+        mov savenew[si], al
+
+        inc si
+        add di, 2
+        dec mousePixelsCnt
+    .endw
+
+    popa
     ret
 save_mouse endp
 
-;功能 :显示鼠标
 show_mouse proc far
-    pushad
+    pusha
+
     mov ax, data
     mov ds, ax
-
-    mov bx, 0
 
     mov ax, mousePixelsLen
     shr ax, 1
@@ -547,55 +524,48 @@ show_mouse proc far
     mov di, 0
     mov si, 0
 
-lodrmos:
-    mov ax, mousePixels[di]
+    .while mousePixelsCnt > 0
+        mov cx, posX
+        mov dx, posY
+        mov ax, mousePixels[di]
 
-    mov cx, posX
-    movzx bx, ah
-    add cx, bx
+        movzx bx, ah
+        add cx, bx
+        movzx bx, al
+        add dx, bx
 
-    mov dx, posY
-    movzx bx, al
-    add dx, bx
+        .if cx <= 639
+            draw cx, dx, mousecolor[si]
+        .endif
 
-    cmp cx, 639
-    jg next                ;超过边框不用画
-    jmp notexceed
+        add di, 2               ;next word
+        dec mousePixelsCnt
+    .endw
 
-notexceed:
-    mov ah, 0ch
-    mov al, mousecolor[si]
-    mov bh, 0
-    int 10h
-    inc si
-
-next:
-    add di, 2               ;next word
-    dec mousePixelsCnt
-    jnz lodrmos
-    popad
+    popa
     ret
 show_mouse endp
 
 btoasc proc far
     mov si, 3
     mov cx, 10
-btoasc1:
-    xor dx, dx
-    div cx
-    add dl, 30h
-    dec si
-    mov [bx][si], dl
-    or si, si
-    jnz btoasc1
+
+    .while si > 0
+        mov dx, 0
+        div cx
+        add dl, 30h
+        dec si
+        mov [bx][si], dl
+    .endw
+
     ret
 btoasc endp
 
 main:
     call init
 
-    drawrect 250, 160, 60, 100, 0fh
-    drawrect 330, 160, 60, 100, 0fh
+    drawrect 250, 160, 20, 20, 0fh
+    drawrect 330, 160, 20, 20, 0fh
 
     call installHandler
     call save_mouse
